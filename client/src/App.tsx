@@ -1,4 +1,4 @@
-import { Switch, Route, Router } from "wouter";
+import { Switch, Route, Router, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -30,7 +30,7 @@ function AppRouter() {
       <Route path="/" component={Thread} />
       <Route path="/favourites" component={Favourites} />
       <Route path="/settings" component={Settings} />
-      <Route component={NotFound} />
+      <Redirect to="/" />
     </Switch>
   );
 }

@@ -385,11 +385,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       );
       if (existing) return existing;
 
-      if (!passagesLoaded || passages.length === 0) {
-        throw new Error("Passages not loaded yet.");
+      // Use ref to get the always-current passages array (avoids stale closure)
+      const currentPassages = Array.from(passageMapRef.current.values());
+      if (currentPassages.length === 0) {
+        throw new Error("Passages not loaded yet — please try again in a moment.");
       }
 
-      const passage = selectPassage(passages, userDeliveries);
+      const passage = selectPassage(currentPassages, userDeliveries);
       const delivery: Delivery = {
         id: uuid(),
         userId,
@@ -420,7 +422,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return delivery;
     },
-    [deliveries, passages, passagesLoaded]
+    [deliveries]
   );
 
   // ── Favourites ──────────────────────────────────────────────────────────────

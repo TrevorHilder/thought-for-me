@@ -37,14 +37,6 @@ export default function PassageCard({
     setToggling(false);
   };
 
-  const typeColors: Record<string, string> = {
-    story: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    aphorism: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300",
-    reflection: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
-    dialogue: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-    poem: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
-  };
-
   return (
     <article
       data-testid={`card-passage-${delivery.id}`}
@@ -94,31 +86,14 @@ export default function PassageCard({
         {passage.text}
       </div>
 
-      {/* Footer — source + tags */}
+      {/* Footer — source */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-muted-foreground italic">
-          <em>{passage.book}</em>
+          <em>{passage.source}</em>
           {passage.page ? (
             <span className="not-italic">, p. {passage.page}</span>
           ) : null}
         </p>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
-              typeColors[passage.type] ?? "bg-muted text-muted-foreground"
-            }`}
-          >
-            {passage.type}
-          </span>
-          {passage.themes.slice(0, 2).map((theme) => (
-            <span
-              key={theme}
-              className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground"
-            >
-              {theme}
-            </span>
-          ))}
-        </div>
       </div>
 
       {isToday && <div className="ornamental-rule mt-4" aria-hidden="true" />}

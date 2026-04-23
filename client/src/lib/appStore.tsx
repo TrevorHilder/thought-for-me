@@ -24,14 +24,11 @@ import { supabase } from "./supabase";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Passage {
-  passage_id: string;
+  id: string;
   title: string;
-  book: string;
-  page: string;
+  source: string;
+  page: number;
   text: string;
-  type: string;
-  length: number;
-  themes: string[];
 }
 
 export interface StoredUser {
@@ -114,41 +111,14 @@ function todayStr(): string {
 function selectPassage(allPassages: Passage[], deliveries: Delivery[]): Passage {
   const deliveredIds = new Set(deliveries.map((d) => d.passageId));
 
-  let candidates = allPassages.filter((p) => !deliveredIds.has(p.passage_id));
+  let candidates = allPassages.filter((p) => !deliveredIds.has(p.id));
   if (candidates.length === 0) {
-    // Pool exhausted — reset and start over
+    // Pool exhausted — start over
     candidates = [...allPassages];
   }
 
-  // Count book occurrences among delivered
-  const bookCounts: Record<string, number> = {};
-  const typeCounts: Record<string, number> = {};
-  for (const d of deliveries) {
-    const p = allPassages.find((p) => p.passage_id === d.passageId);
-    if (p) {
-      bookCounts[p.book] = (bookCounts[p.book] ?? 0) + 1;
-      typeCounts[p.type] = (typeCounts[p.type] ?? 0) + 1;
-    }
-  }
-
-  // Min count across types — prefer under-represented types
-  const minTypeCount = Math.min(...Object.values(typeCounts), 0);
-
-  // Filter by type balance (allow up to minCount + 1)
-  const typeBalanced = candidates.filter(
-    (p) => (typeCounts[p.type] ?? 0) <= minTypeCount + 1
-  );
-  const pool = typeBalanced.length > 0 ? typeBalanced : candidates;
-
-  // Sort by book delivery count ascending (prefer least-used books)
-  const sorted = [...pool].sort(
-    (a, b) => (bookCounts[a.book] ?? 0) - (bookCounts[b.book] ?? 0)
-  );
-
-  // Pick from top 20% (min 1)
-  const topN = Math.max(1, Math.ceil(sorted.length * 0.2));
-  const topPool = sorted.slice(0, topN);
-  return topPool[Math.floor(Math.random() * topPool.length)];
+  // Pick randomly from candidates, weighted slightly toward less-recently-delivered
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 /** Convert a Supabase delivery row to the app's Delivery type */
@@ -211,7 +181,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       .then((r) => r.json())
       .then((data: Passage[]) => {
         const map = new Map<string, Passage>();
-        for (const p of data) map.set(p.passage_id, p);
+        for (const p of data) map.set(p.id, p);
         passageMapRef.current = map;
         setPassages(data);
         setPassagesLoaded(true);
@@ -395,7 +365,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const delivery: Delivery = {
         id: uuid(),
         userId,
-        passageId: passage.passage_id,
+        passageId: passage.id,
         deliveredAt: new Date().toISOString(),
         readAt: null,
         isFavourite: false,

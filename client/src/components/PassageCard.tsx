@@ -1,7 +1,31 @@
 import { useState } from "react";
 import { useAppStore, type Delivery } from "@/lib/appStore";
-import { Heart } from "lucide-react";
+import { Heart, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
+
+// Map book source names to their ISF PDF viewer slugs.
+// Two books have non-obvious slugs; the rest follow the standard pattern.
+const ISF_SLUG_OVERRIDES: Record<string, string> = {
+  "Lectures And Letters": "letters-and-lectures",
+  "The World Of the Sufi": "the-world-of-the-sufis",
+};
+
+function sourceToSlug(source: string): string {
+  if (ISF_SLUG_OVERRIDES[source]) return ISF_SLUG_OVERRIDES[source];
+  return source
+    .toLowerCase()
+    .replace(/[''']/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
+function isfUrl(source: string, page?: number): string {
+  const slug = sourceToSlug(source);
+  const base = `https://idriesshahfoundation.org/pdfviewer/${slug}/?auto_viewer=true`;
+  return page ? `${base}#page=${page}` : base;
+}
 
 interface PassageCardProps {
   delivery: Delivery;
@@ -86,7 +110,7 @@ export default function PassageCard({
         {passage.text}
       </div>
 
-      {/* Footer — source */}
+      {/* Footer — source + ISF link */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-muted-foreground italic">
           <em>{passage.source}</em>
@@ -94,6 +118,16 @@ export default function PassageCard({
             <span className="not-italic">, p. {passage.page}</span>
           ) : null}
         </p>
+        <a
+          href={isfUrl(passage.source, passage.page)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-primary hover:underline flex-shrink-0"
+          title="Read in the Idries Shah Foundation PDF viewer"
+        >
+          Read online
+          <ExternalLink className="h-3 w-3" />
+        </a>
       </div>
 
       {isToday && <div className="ornamental-rule mt-4" aria-hidden="true" />}

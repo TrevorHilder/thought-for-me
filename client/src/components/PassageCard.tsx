@@ -57,7 +57,7 @@ function sourceToSlug(source: string): string {
 function isfUrl(source: string, printedPage?: number): string {
   const slug = sourceToSlug(source);
   const base = `https://idriesshahfoundation.org/pdfviewer/${slug}/?auto_viewer=true`;
-  if (!printedPage) return base;
+  if (printedPage == null || printedPage === 0) return base;
   const pdfPage = printedPage + (BOOK_OFFSETS[source] ?? 0);
   return `${base}#page=${pdfPage}`;
 }

@@ -73,14 +73,15 @@ export default function Settings() {
     },
   });
 
-  // Reset form whenever prefs object identity changes
+  // Reset form whenever prefs load from Supabase (not just on user.id change,
+  // which can fire before hydrateUser has finished fetching real values)
   useEffect(() => {
     form.reset({
       preferredTime: prefs.preferredTime,
       timezone: prefs.timezone,
       emailNotifications: prefs.emailNotifications,
     });
-  }, [user.id]);
+  }, [prefs.preferredTime, prefs.timezone, prefs.emailNotifications]);
 
   const onSubmit = (data: PrefForm) => {
     setSaving(true);

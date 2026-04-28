@@ -1,20 +1,13 @@
 /**
  * Supabase Edge Function — hourly thought delivery
  *
- * Invoked every hour by a pg_cron job:
- *   select net.http_post(
- *     url := 'https://tamqiesklcjetftnumpm.supabase.co/functions/v1/deliver',
- *     headers := '{"Authorization":"Bearer <ANON_KEY>","Content-Type":"application/json"}'::jsonb,
- *     body := '{}'::jsonb
- *   );
- *
- * Finds users whose preferred_time hour matches the current hour in their
- * timezone and who haven't received a delivery today, selects a passage,
- * records it in the deliveries table, and sends an email via AWS SES SMTP.
+ * Invoked every hour by a pg_cron job. Finds users whose preferred_time hour
+ * matches the current UTC hour (after timezone conversion), selects a passage,
+ * records it in the deliveries table, and sends an email via AWS SES HTTP API
+ * (Signature V4 signed — no SMTP/TCP required).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +54,7 @@ function isfUrl(source: string, printedPage?: number): string {
     source.toLowerCase().replace(/[''']/g, "").replace(/[^a-z0-9\s-]/g, "")
       .trim().replace(/\s+/g, "-").replace(/-+/g, "-");
   const base = `https://idriesshahfoundation.org/pdfviewer/${slug}/?auto_viewer=true`;
-  if (!printedPage) return base;
+  if (printedPage == null || printedPage === 0) return base;
   return `${base}#page=${printedPage + (BOOK_OFFSETS[source] ?? 0)}`;
 }
 
@@ -75,16 +68,32 @@ function selectPassage(allPassages: Passage[], deliveredIds: Set<string>): Passa
 
 // ── Email builder ─────────────────────────────────────────────────────────────
 
+function reflow(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .replace(/(?<!\n)\n(?!\n)/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/  +/g, ' ')
+    .trim();
+}
+
+function truncate(text: string, maxChars = 300): string {
+  const reflowed = reflow(text);
+  if (reflowed.length <= maxChars) return reflowed;
+  // Break at a word boundary
+  const cut = reflowed.lastIndexOf(" ", maxChars);
+  return reflowed.slice(0, cut > 0 ? cut : maxChars) + " ...";
+}
+
 function buildEmail(passage: Passage, appUrl: string): { subject: string; text: string; html: string } {
   const readUrl = isfUrl(passage.source, passage.page);
   const pageRef = passage.page ? `, p. ${passage.page}` : "";
-
-  const subject = `${passage.title} — A Thought for Me`;
+  const subject = `A Thought for Me \u2013 ${passage.title}`;
+  const preview = truncate(passage.text);
 
   const text = [
-    "A Thought for Me", "",
-    passage.title, "",
-    passage.text, "",
+    subject, "",
+    preview, "",
     `— ${passage.source}${pageRef}`, "",
     `Read online: ${readUrl}`,
     `View your thread: ${appUrl}`,
@@ -106,7 +115,7 @@ function buildEmail(passage: Passage, appUrl: string): { subject: string; text: 
         <tr>
           <td style="padding:36px 40px 28px;">
             <h2 style="margin:0 0 20px;font-size:20px;color:#1a1a1a;font-family:Georgia,serif;font-weight:normal;line-height:1.3;">${passage.title}</h2>
-            <div style="font-size:16px;line-height:1.8;color:#2c2c2c;font-family:Georgia,serif;">${passage.text.replace(/\n/g, "<br>")}</div>
+            <div style="font-size:16px;line-height:1.8;color:#2c2c2c;font-family:Georgia,serif;">${preview.replace(/\n\n/g, '<br><br>').replace(/\n/g, ' ')}</div>
           </td>
         </tr>
         <tr>
@@ -136,13 +145,118 @@ function buildEmail(passage: Passage, appUrl: string): { subject: string; text: 
   return { subject, text, html };
 }
 
+// ── AWS SES via HTTP API (Signature V4) ───────────────────────────────────────
+
+const enc = new TextEncoder();
+
+async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return crypto.subtle.sign("HMAC", k, enc.encode(data));
+}
+
+async function sha256Hex(data: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", enc.encode(data));
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function getSigningKey(secretKey: string, dateStamp: string, region: string, service: string): Promise<ArrayBuffer> {
+  const kDate = await hmacSha256(enc.encode(`AWS4${secretKey}`), dateStamp);
+  const kRegion = await hmacSha256(kDate, region);
+  const kService = await hmacSha256(kRegion, service);
+  return hmacSha256(kService, "aws4_request");
+}
+
+async function sendEmailViaSES(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}): Promise<void> {
+  const { to, subject, text, html, accessKeyId, secretAccessKey } = opts;
+  const REGION = "us-east-1";
+  const SERVICE = "email";
+  const HOST = `${SERVICE}.${REGION}.amazonaws.com`;
+  const ENDPOINT = `https://${HOST}/`;
+  const FROM = "A Thought for Me <library@thethirdsystem.foundation>";
+
+  // Build MIME message for SendRawEmail (v1 API — permitted by AmazonSesSendingAccess)
+  // Use base64 body encoding to avoid quoted-printable mangling of URLs containing #page=N
+  const toBase64 = (str: string) => btoa(unescape(encodeURIComponent(str)));
+  const boundary = `mime_${Date.now()}`;
+  const mime = [
+    `From: ${FROM}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    toBase64(text),
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    toBase64(html),
+    ``,
+    `--${boundary}--`,
+  ].join("\r\n");
+
+  // Base64-encode the entire raw MIME message for SendRawEmail
+  const rawBase64 = btoa(unescape(encodeURIComponent(mime)));
+
+  // URL-encoded form body for SendRawEmail
+  const body = new URLSearchParams({
+    Action: "SendRawEmail",
+    "RawMessage.Data": rawBase64,
+  }).toString();
+
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 15) + "Z";
+  const dateStamp = amzDate.slice(0, 8);
+
+  const payloadHash = await sha256Hex(body);
+  const canonicalHeaders = `content-type:application/x-www-form-urlencoded\nhost:${HOST}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = "content-type;host;x-amz-date";
+  const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+
+  const credentialScope = `${dateStamp}/${REGION}/${SERVICE}/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${await sha256Hex(canonicalRequest)}`;
+
+  const signingKey = await getSigningKey(secretAccessKey, dateStamp, REGION, SERVICE);
+  const signatureBytes = await hmacSha256(signingKey, stringToSign);
+  const signature = Array.from(new Uint8Array(signatureBytes)).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+  const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Amz-Date": amzDate,
+      "Authorization": authHeader,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`SES API error ${res.status}: ${err}`);
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (_req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const smtpUser = Deno.env.get("SES_SMTP_USER")!;
-  const smtpPassword = Deno.env.get("SES_SMTP_PASSWORD")!;
+  const sesAccessKeyId = Deno.env.get("SES_ACCESS_KEY_ID")!;
+  const sesSecretAccessKey = Deno.env.get("SES_SECRET_ACCESS_KEY")!;
   const appUrl = Deno.env.get("APP_URL") ?? "https://thought-for-me.vercel.app";
 
   const supabase = createClient(supabaseUrl, serviceKey);
@@ -180,20 +294,24 @@ Deno.serve(async (_req) => {
         // 4. Select passage
         const passage = selectPassage(allPassages, deliveredIds);
 
-        // 5. Insert delivery
+        // 5. Insert delivery record
         const { error: insertErr } = await supabase
           .from("deliveries")
           .insert({ user_id: user.user_id, passage_id: passage.id, delivered_at: new Date().toISOString() });
 
         if (insertErr) throw new Error(`Insert failed: ${insertErr.message}`);
 
-        // 6. Send email if enabled
+        // 6. Send email
         if (user.email_notifications && user.email) {
           const { subject, text, html } = buildEmail(passage, appUrl);
-          const client = new SmtpClient();
-          await client.connectTLS({ hostname: "email-smtp.us-east-1.amazonaws.com", port: 465, username: smtpUser, password: smtpPassword });
-          await client.send({ from: "library@thethirdsystem.foundation", to: user.email, subject, content: text, html });
-          await client.close();
+          await sendEmailViaSES({
+            to: user.email,
+            subject,
+            text,
+            html,
+            accessKeyId: sesAccessKeyId,
+            secretAccessKey: sesSecretAccessKey,
+          });
         }
 
         results.push({ email: user.email, status: "delivered" });
@@ -202,12 +320,14 @@ Deno.serve(async (_req) => {
       }
     }
 
-    return new Response(JSON.stringify({ delivered: results.filter(r => r.status === "delivered").length, results }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ delivered: results.filter((r) => r.status === "delivered").length, results }),
+      { headers: { "Content-Type": "application/json" } },
+    );
   } catch (e: unknown) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
-      status: 500, headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
 });

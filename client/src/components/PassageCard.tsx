@@ -140,9 +140,17 @@ export default function PassageCard({
         </button>
       </div>
 
-      {/* Passage text */}
-      <div className="prose-passage text-foreground whitespace-pre-line mb-5">
-        {passage.text}
+      {/* Passage text — reflow single line-breaks into spaces, preserve paragraph breaks */}
+      <div className="prose-passage text-foreground mb-5 space-y-4">
+        {passage.text
+          .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+          .replace(/(?<!\n)\n(?!\n)/g, ' ')
+          .replace(/\n{3,}/g, '\n\n')
+          .replace(/  +/g, ' ')
+          .trim()
+          .split('\n\n')
+          .map((para, i) => <p key={i}>{para.trim()}</p>)
+        }
       </div>
 
       {/* Footer — source + ISF link */}

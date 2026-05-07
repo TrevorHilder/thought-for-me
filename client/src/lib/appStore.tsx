@@ -23,6 +23,12 @@ import { supabase } from "./supabase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface Book {
+  name: string;
+  slug: string;
+  page_offset: number;
+}
+
 export interface Passage {
   id: string;
   title: string;
@@ -68,6 +74,9 @@ interface AppStoreValue {
   // Passages
   passages: Passage[];
   passagesLoaded: boolean;
+
+  // Books
+  books: Map<string, Book>;
 
   // Auth
   register: (email: string, password: string) => Promise<StoredUser>;
@@ -163,6 +172,7 @@ const AppStoreContext = createContext<AppStoreValue | null>(null);
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [passages, setPassages] = useState<Passage[]>([]);
   const [passagesLoaded, setPassagesLoaded] = useState(false);
+  const [books, setBooks] = useState<Map<string, Book>>(new Map());
 
   // Local cache of DB state (keyed by userId)
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
@@ -174,20 +184,38 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   // Track which userId we've hydrated for
   const hydratedForRef = useRef<string | null>(null);
 
-  // ── Load passages.json once on mount ────────────────────────────────────────
+  // ── Load books from Supabase once on mount ────────────────────────────────
 
   useEffect(() => {
-    fetch('/passages.json')
-      .then((r) => r.json())
-      .then((data: Passage[]) => {
-        const map = new Map<string, Passage>();
-        for (const p of data) map.set(p.id, p);
-        passageMapRef.current = map;
-        setPassages(data);
-        setPassagesLoaded(true);
-      })
-      .catch((err) => {
-        console.error("Failed to load passages.json:", err);
+    supabase
+      .from("books")
+      .select("name, slug, page_offset")
+      .then(({ data, error }) => {
+        if (error) { console.error("Failed to load books:", error); return; }
+        if (data) {
+          const map = new Map<string, Book>();
+          for (const b of data) map.set(b.name, b as Book);
+          setBooks(map);
+        }
+      });
+  }, []);
+
+  // ── Load passages from Supabase once on mount ───────────────────────────────
+
+  useEffect(() => {
+    supabase
+      .from("passages")
+      .select("id, title, source, page, text")
+      .eq("deleted", false)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Failed to load passages:", error);
+        } else if (data) {
+          const map = new Map<string, Passage>();
+          for (const p of data) map.set(p.id, p as Passage);
+          passageMapRef.current = map;
+          setPassages(data as Passage[]);
+        }
         setPassagesLoaded(true);
       });
   }, []);
@@ -502,6 +530,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const value: AppStoreValue = {
     passages,
     passagesLoaded,
+    books,
     register,
     login,
     getDeliveries,

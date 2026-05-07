@@ -252,7 +252,8 @@ Deno.serve(async (_req) => {
     const { data: passageRows, error: passageErr } = await supabase
       .from("passages")
       .select("id, title, text, source, page")
-      .eq("deleted", false);
+      .eq("deleted", false)
+      .limit(10000);
     if (passageErr) throw new Error(`Failed to fetch passages: ${passageErr.message}`);
     const allPassages: Passage[] = (passageRows ?? []) as Passage[];
 

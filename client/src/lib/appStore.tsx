@@ -207,6 +207,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       .from("passages")
       .select("id, title, source, page, text")
       .eq("deleted", false)
+      .limit(10000)
       .then(({ data, error }) => {
         if (error) {
           console.error("Failed to load passages:", error);

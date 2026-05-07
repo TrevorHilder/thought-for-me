@@ -19,6 +19,12 @@ interface Passage {
   page: number;
 }
 
+interface Book {
+  name: string;
+  slug: string;
+  page_offset: number;
+}
+
 interface DueUser {
   user_id: string;
   email: string;
@@ -27,35 +33,15 @@ interface DueUser {
   email_notifications: boolean;
 }
 
-// ── Book offsets (printed page → PDF page) ───────────────────────────────────
+// ── ISF URL builder — uses runtime book map from Supabase ────────────────────
 
-const BOOK_OFFSETS: Record<string, number> = {
-  "A Perfumed Scorpion": 12, "A Veiled Gazelle": 10, "Caravan of Dreams": 14,
-  "Evenings With Idries Shah": 6, "Knowing How To Know": 18, "Learning How to Learn": 22,
-  "Lectures And Letters": 6, "Neglected Aspects Of Sufi Study": 12, "Observations": 8,
-  "Reflections": 8, "Seeker After Truth": 12, "Special Illumination": 8,
-  "Sufi Thought And Action": 10, "Tales of the Dervishes": 14, "The Book Of The Book": 10,
-  "The Commanding Self": 16, "The Dermis Probe": 16,
-  "The Exploits Of The Incomparable Mulla Nasrudin": 14,
-  "The Hundred Tales Of Wisdom": 10, "The Magic Monastery": 14,
-  "The Pleasantries Of The Incredible Mulla Nasrudin": 16,
-  "The Subtleties Of The Inimitable Mulla Nasrudin": 18,
-  "The Sufis": 18, "The Way of the Sufi": 10, "The World Of Nasrudin": 22,
-  "The World Of the Sufi": 12, "Thinkers of the East": 14, "Wisdom of the Idiots": 12,
-};
-
-const ISF_SLUG_OVERRIDES: Record<string, string> = {
-  "Lectures And Letters": "letters-and-lectures",
-  "The World Of the Sufi": "the-world-of-the-sufis",
-};
-
-function isfUrl(source: string, printedPage?: number): string {
-  const slug = ISF_SLUG_OVERRIDES[source] ??
+function isfUrl(book: Book | undefined, source: string, printedPage?: number): string {
+  const slug = book?.slug ??
     source.toLowerCase().replace(/[''']/g, "").replace(/[^a-z0-9\s-]/g, "")
       .trim().replace(/\s+/g, "-").replace(/-+/g, "-");
   const base = `https://idriesshahfoundation.org/pdfviewer/${slug}/?auto_viewer=true`;
   if (printedPage == null || printedPage === 0) return base;
-  return `${base}#page=${printedPage + (BOOK_OFFSETS[source] ?? 0)}`;
+  return `${base}#page=${printedPage + (book?.page_offset ?? 0)}`;
 }
 
 // ── Passage selection ─────────────────────────────────────────────────────────
@@ -85,8 +71,8 @@ function truncate(text: string, maxChars = 300): string {
   return reflowed.slice(0, cut > 0 ? cut : maxChars) + " ...";
 }
 
-function buildEmail(passage: Passage, appUrl: string): { subject: string; text: string; html: string } {
-  const readUrl = isfUrl(passage.source, passage.page);
+function buildEmail(passage: Passage, bookMap: Map<string, Book>, appUrl: string): { subject: string; text: string; html: string } {
+  const readUrl = isfUrl(bookMap.get(passage.source), passage.source, passage.page);
   const pageRef = passage.page ? `, p. ${passage.page}` : "";
   const subject = `A Thought for Me \u2013 ${passage.title}`;
   const preview = truncate(passage.text);
@@ -262,10 +248,22 @@ Deno.serve(async (_req) => {
   const supabase = createClient(supabaseUrl, serviceKey);
 
   try {
-    // 1. Load passages from the live app
-    const passagesResp = await fetch(`${appUrl}/passages.json`);
-    if (!passagesResp.ok) throw new Error(`Failed to fetch passages: ${passagesResp.status}`);
-    const allPassages: Passage[] = await passagesResp.json();
+    // 1. Load passages from Supabase
+    const { data: passageRows, error: passageErr } = await supabase
+      .from("passages")
+      .select("id, title, text, source, page")
+      .eq("deleted", false);
+    if (passageErr) throw new Error(`Failed to fetch passages: ${passageErr.message}`);
+    const allPassages: Passage[] = (passageRows ?? []) as Passage[];
+
+    // 1b. Load books from Supabase (slug + page_offset lookup)
+    const { data: bookRows, error: bookErr } = await supabase
+      .from("books")
+      .select("name, slug, page_offset");
+    if (bookErr) throw new Error(`Failed to fetch books: ${bookErr.message}`);
+    const bookMap = new Map<string, Book>(
+      (bookRows ?? []).map((b: Book) => [b.name, b])
+    );
 
     // 2. Find users due for delivery
     const { data: dueUsers, error: viewErr } = await supabase
@@ -303,7 +301,7 @@ Deno.serve(async (_req) => {
 
         // 6. Send email
         if (user.email_notifications && user.email) {
-          const { subject, text, html } = buildEmail(passage, appUrl);
+          const { subject, text, html } = buildEmail(passage, bookMap, appUrl);
           await sendEmailViaSES({
             to: user.email,
             subject,

@@ -1,65 +1,13 @@
 import { useState } from "react";
-import { useAppStore, type Delivery } from "@/lib/appStore";
+import { useAppStore, type Delivery, type Book } from "@/lib/appStore";
 import { Heart, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 
-// PDF page = printed page + offset.
-// Offsets were established during passage extraction from the Google Drive PDFs.
-const BOOK_OFFSETS: Record<string, number> = {
-  "A Perfumed Scorpion": 12,
-  "A Veiled Gazelle": 10,
-  "Caravan of Dreams": 14,
-  "Evenings With Idries Shah": 6,
-  "Knowing How To Know": 18,
-  "Learning How to Learn": 22,
-  "Lectures And Letters": 6,
-  "Neglected Aspects Of Sufi Study": 12,
-  "Observations": 8,
-  "Reflections": 8,
-  "Seeker After Truth": 12,
-  "Special Illumination": 8,
-  "Sufi Thought And Action": 10,
-  "Tales of the Dervishes": 14,
-  "The Book Of The Book": 10,
-  "The Commanding Self": 16,
-  "The Dermis Probe": 16,
-  "The Exploits Of The Incomparable Mulla Nasrudin": 14,
-  "The Hundred Tales Of Wisdom": 10,
-  "The Magic Monastery": 14,
-  "The Pleasantries Of The Incredible Mulla Nasrudin": 16,
-  "The Subtleties Of The Inimitable Mulla Nasrudin": 18,
-  "The Sufis": 18,
-  "The Way of the Sufi": 10,
-  "The World Of Nasrudin": 22,
-  "The World Of the Sufi": 12,
-  "Thinkers of the East": 14,
-  "Wisdom of the Idiots": 12,
-};
-
-// Two books have non-obvious slugs on the ISF site; the rest follow the
-// standard pattern of lowercasing and replacing spaces with hyphens.
-const ISF_SLUG_OVERRIDES: Record<string, string> = {
-  "Lectures And Letters": "letters-and-lectures",
-  "The World Of the Sufi": "the-world-of-the-sufis",
-};
-
-function sourceToSlug(source: string): string {
-  if (ISF_SLUG_OVERRIDES[source]) return ISF_SLUG_OVERRIDES[source];
-  return source
-    .toLowerCase()
-    .replace(/[''']/g, "")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-}
-
-function isfUrl(source: string, printedPage?: number): string {
-  const slug = sourceToSlug(source);
+function isfUrl(book: Book | undefined, source: string, printedPage?: number): string {
+  const slug = book?.slug ?? source.toLowerCase().replace(/[''']/g, "").replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-").replace(/-+/g, "-");
   const base = `https://idriesshahfoundation.org/pdfviewer/${slug}/?auto_viewer=true`;
   if (printedPage == null || printedPage === 0) return base;
-  const pdfPage = printedPage + (BOOK_OFFSETS[source] ?? 0);
-  return `${base}#page=${pdfPage}`;
+  return `${base}#page=${printedPage + (book?.page_offset ?? 0)}`;
 }
 
 interface PassageCardProps {
@@ -75,7 +23,7 @@ export default function PassageCard({
   userId,
   onFavouriteChange,
 }: PassageCardProps) {
-  const { toggleFavourite } = useAppStore();
+  const { toggleFavourite, books } = useAppStore();
   const [isFav, setIsFav] = useState(delivery.isFavourite);
   const [toggling, setToggling] = useState(false);
 
@@ -162,7 +110,7 @@ export default function PassageCard({
           ) : null}
         </p>
         <a
-          href={isfUrl(passage.source, passage.page)}
+          href={isfUrl(books.get(passage.source), passage.source, passage.page)}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs text-primary hover:underline flex-shrink-0"

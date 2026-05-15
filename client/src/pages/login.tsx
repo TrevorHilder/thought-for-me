@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useAppStore } from "@/lib/appStore";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,12 +41,84 @@ function StarMark() {
   );
 }
 
+function ForgotPassword({ onBack }: { onBack: () => void }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}${window.location.pathname}#/reset-password`,
+      });
+      if (error) throw error;
+      setSent(true);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send reset email — please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className="border-card-border shadow-md">
+      <CardHeader className="pb-4">
+        <h2 className="text-base font-semibold text-foreground">Reset your password</h2>
+      </CardHeader>
+      <CardContent>
+        {sent ? (
+          <p className="text-sm text-muted-foreground">
+            Check your email — a password reset link has been sent to <strong>{email}</strong>.
+          </p>
+        ) : (
+          <form onSubmit={submit} className="flex flex-col gap-4">
+            {errorMsg && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
+                {errorMsg}
+              </div>
+            )}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="reset-email">Email address</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                data-testid="input-reset-email"
+              />
+            </div>
+            <Button type="submit" disabled={loading || !email} className="w-full">
+              {loading ? "Sending…" : "Send reset link"}
+            </Button>
+          </form>
+        )}
+      </CardContent>
+      <CardFooter className="pt-0">
+        <button
+          onClick={onBack}
+          className="text-sm text-primary hover:underline w-full text-center"
+          data-testid="link-back-to-login"
+        >
+          Back to sign in
+        </button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export default function Login() {
   const { setUser } = useAuth();
   const { login: storeLogin } = useAppStore();
   const [, navigate] = useHashLocation();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showForgot, setShowForgot] = useState(false);
 
   const form = useForm<LoginData>({ resolver: zodResolver(loginSchema) });
 
@@ -77,6 +150,9 @@ export default function Login() {
           A daily passage from the works of Idries Shah
         </p>
 
+        {showForgot ? (
+          <ForgotPassword onBack={() => setShowForgot(false)} />
+        ) : (
         <Card className="border-card-border shadow-md">
           <CardHeader className="pb-4">
             <h2 className="text-base font-semibold text-foreground">Sign in to your account</h2>
@@ -137,6 +213,14 @@ export default function Login() {
               >
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-xs text-muted-foreground hover:text-primary text-center w-full"
+                data-testid="link-forgot-password"
+              >
+                Forgot password?
+              </button>
             </form>
           </CardContent>
           <CardFooter className="pt-0">
@@ -148,6 +232,7 @@ export default function Login() {
             </p>
           </CardFooter>
         </Card>
+        )}
       </div>
 
       <footer className="mt-12 text-center">

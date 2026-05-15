@@ -9,6 +9,7 @@ import { AppStoreProvider } from "@/lib/appStore";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
+import ResetPassword from "@/pages/reset-password";
 import Thread from "@/pages/thread";
 import Favourites from "@/pages/favourites";
 import Settings from "@/pages/settings";
@@ -20,6 +21,7 @@ function AppRouter() {
     return (
       <Switch>
         <Route path="/register" component={Register} />
+        <Route path="/reset-password" component={ResetPassword} />
         <Route component={Login} />
       </Switch>
     );

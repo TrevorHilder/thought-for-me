@@ -1,31 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { useHashLocation } from "wouter/use-hash-location";
 
 export default function ResetPassword() {
-  const { setUser } = useAuth();
-  const [, navigate] = useHashLocation();
+  const { setUser, clearRecovery } = useAuth();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  // Supabase sends the user to this page with a session already established
-  // via the URL fragment — onAuthStateChange picks it up automatically.
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        // Session is ready — user can now set a new password
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+  // Supabase establishes the session automatically via the URL fragment
+  // when the recovery link is clicked — AuthProvider catches PASSWORD_RECOVERY
+  // and sets isRecovery=true, which renders this component.
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +37,9 @@ export default function ResetPassword() {
         setUser({ id: data.user.id, email: data.user.email ?? "" });
       }
       setDone(true);
-      setTimeout(() => navigate("/"), 2000);
+      // Clear recovery mode after a short delay — AppRouter will then
+      // render the normal logged-in view (Thread).
+      setTimeout(() => clearRecovery(), 2000);
     } catch (e: any) {
       setErrorMsg(e?.message ?? "Could not update password — please try again.");
     } finally {

@@ -15,13 +15,18 @@ import Favourites from "@/pages/favourites";
 import Settings from "@/pages/settings";
 
 function AppRouter() {
-  const { user } = useAuth();
+  const { user, isRecovery } = useAuth();
+
+  // Password recovery link clicked — always go to reset page, even though
+  // Supabase has established a session. clearRecovery() is called on success.
+  if (isRecovery) {
+    return <ResetPassword />;
+  }
 
   if (!user) {
     return (
       <Switch>
         <Route path="/register" component={Register} />
-        <Route path="/reset-password" component={ResetPassword} />
         <Route component={Login} />
       </Switch>
     );

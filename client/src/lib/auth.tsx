@@ -6,6 +6,11 @@
  * data hydration; this context is kept thin — it just tracks who's logged in.
  *
  * Session is restored on page reload via supabase.auth.getSession().
+ *
+ * PASSWORD_RECOVERY: when Supabase redirects back from a reset link it fires
+ * a PASSWORD_RECOVERY event (with a valid session). We capture that separately
+ * so AppRouter can send the user to /reset-password rather than treating them
+ * as fully logged in.
  */
 
 import {
@@ -26,16 +31,21 @@ interface AuthContextValue {
   user: AuthUser | null;
   setUser: (user: AuthUser | null) => void;
   logout: () => void;
+  isRecovery: boolean;
+  clearRecovery: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   setUser: () => {},
   logout: () => {},
+  isRecovery: false,
+  clearRecovery: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<AuthUser | null>(null);
+  const [isRecovery, setIsRecovery] = useState(false);
 
   // Restore session on mount and listen for changes
   useEffect(() => {
@@ -52,7 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Subscribe to future auth state changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        // Don't treat this as a normal login — route to /reset-password instead
+        if (session?.user) {
+          setUserState({
+            id: session.user.id,
+            email: session.user.email ?? "",
+          });
+        }
+        setIsRecovery(true);
+        return;
+      }
+
       if (session?.user) {
         setUserState({
           id: session.user.id,
@@ -60,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       } else {
         setUserState(null);
+        setIsRecovery(false);
       }
     });
 
@@ -70,6 +93,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserState(u);
   };
 
+  const clearRecovery = () => {
+    setIsRecovery(false);
+  };
+
   const logout = () => {
     supabase.auth.signOut().catch((err) => {
       console.error("Sign out error:", err);
@@ -78,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, logout }}>
+    <AuthContext.Provider value={{ user, setUser, logout, isRecovery, clearRecovery }}>
       {children}
     </AuthContext.Provider>
   );

@@ -53,7 +53,7 @@ function ForgotPassword({ onBack }: { onBack: () => void }) {
     setErrorMsg(null);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}${window.location.pathname}#/reset-password`,
+        redirectTo: window.location.origin,
       });
       if (error) throw error;
       setSent(true);
